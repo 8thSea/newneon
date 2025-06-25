@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Space Flight Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+            color: #00ff00;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border: 2px solid #00ff00;
+            border-radius: 5px;
+            min-width: 200px;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border: 2px solid #00ff00;
+            border-radius: 5px;
+            max-width: 300px;
+            font-size: 12px;
+        }
+        
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid #00ff00;
+            border-radius: 50%;
+            z-index: 50;
+            pointer-events: none;
+        }
+        
+        #crosshair::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background: #00ff00;
+            border-radius: 50%;
+        }
+        
+        .hud-item {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="crosshair"></div>
+        
+        <div id="hud">
+            <div class="hud-item">SPEED: <span id="speed">0</span> km/s</div>
+            <div class="hud-item">ALTITUDE: <span id="altitude">1000</span> km</div>
+            <div class="hud-item">FUEL: <span id="fuel">100</span>%</div>
+            <div class="hud-item">THRUST: <span id="thrust">0</span>%</div>
+        </div>
+        
+        <div id="controls">
+            <div><strong>CONTROLS:</strong></div>
+            <div>W/S - Pitch Up/Down</div>
+            <div>A/D - Roll Left/Right</div>
+            <div>Q/E - Yaw Left/Right</div>
+            <div>SPACE - Thrust</div>
+            <div>SHIFT - Boost</div>
+            <div>R - Reset Position</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        class SpaceFlightSimulator {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50000);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setClearColor(0x000011);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                
+                document.getElementById('gameContainer').appendChild(this.renderer.domElement);
+                
+                // Ship properties
+                this.ship = null;
+                this.velocity = new THREE.Vector3(0, 0, 0);
+                this.angularVelocity = new THREE.Vector3(0, 0, 0);
+                this.thrust = 0;
+                this.fuel = 100;
+                this.maxSpeed = 50;
+                this.thrustPower = 0.5;
+                
+                // Input handling
+                this.keys = {};
+                this.setupControls();
+                
+                // Initialize
+                this.createScene();
+                this.createShip();
+                this.animate();
+                
+                // HUD elements
+                this.speedElement = document.getElementById('speed');
+                this.altitudeElement = document.getElementById('altitude');
+                this.fuelElement = document.getElementById('fuel');
+                this.thrustElement = document.getElementById('thrust');
+            }
+            
+            setupControls() {
+                document.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                });
+                
+                document.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+                
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+            
+            createScene() {
+                // Create starfield
+                this.createStarfield();
+                
+                // Create planets
+                this.createPlanets();
+                
+                // Add lighting
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight.position.set(100, 100, 50);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                this.scene.add(directionalLight);
+            }
+            
+            createStarfield() {
+                const starsGeometry = new THREE.BufferGeometry();
+                const starsMaterial = new THREE.PointsMaterial({ 
+                    color: 0xffffff, 
+                    size: 2,
+                    sizeAttenuation: false
+                });
+                
+                const starsVertices = [];
+                for (let i = 0; i < 10000; i++) {
+                    const x = (Math.random() - 0.5) * 40000;
+                    const y = (Math.random() - 0.5) * 40000;
+                    const z = (Math.random() - 0.5) * 40000;
+                    starsVertices.push(x, y, z);
+                }
+                
+                starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+                const stars = new THREE.Points(starsGeometry, starsMaterial);
+                this.scene.add(stars);
+            }
+            
+            createPlanets() {
+                // Earth-like planet
+                const earthGeometry = new THREE.SphereGeometry(500, 32, 32);
+                const earthMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0x4488ff,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const earth = new THREE.Mesh(earthGeometry, earthMaterial);
+                earth.position.set(0, -1000, 0);
+                earth.receiveShadow = true;
+                this.scene.add(earth);
+                
+                // Mars-like planet
+                const marsGeometry = new THREE.SphereGeometry(300, 32, 32);
+                const marsMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0xff4444,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const mars = new THREE.Mesh(marsGeometry, marsMaterial);
+                mars.position.set(3000, 500, 2000);
+                mars.receiveShadow = true;
+                this.scene.add(mars);
+                
+                // Moon
+                const moonGeometry = new THREE.SphereGeometry(100, 16, 16);
+                const moonMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0xcccccc,
+                    transparent: true,
+                    opacity: 0.9
+                });
+                const moon = new THREE.Mesh(moonGeometry, moonMaterial);
+                moon.position.set(-800, -800, 500);
+                moon.receiveShadow = true;
+                this.scene.add(moon);
+            }
+            
+            createShip() {
+                const shipGroup = new THREE.Group();
+                
+                // Main body
+                const bodyGeometry = new THREE.CylinderGeometry(2, 8, 20, 8);
+                const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
+                const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                body.rotation.z = Math.PI / 2;
+                body.castShadow = true;
+                shipGroup.add(body);
+                
+                // Wings
+                const wingGeometry = new THREE.BoxGeometry(15, 1, 8);
+                const wingMaterial = new THREE.MeshLambertMaterial({ color: 0x444444 });
+                const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+                leftWing.position.set(-5, 0, -6);
+                leftWing.castShadow = true;
+                shipGroup.add(leftWing);
+                
+                const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
+                rightWing.position.set(-5, 0, 6);
+                rightWing.castShadow = true;
+                shipGroup.add(rightWing);
+                
+                // Cockpit
+                const cockpitGeometry = new THREE.SphereGeometry(3, 8, 8);
+                const cockpitMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0x0088ff,
+                    transparent: true,
+                    opacity: 0.7
+                });
+                const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+                cockpit.position.set(8, 2, 0);
+                cockpit.castShadow = true;
+                shipGroup.add(cockpit);
+                
+                // Engine glow
+                const engineGeometry = new THREE.ConeGeometry(3, 6, 8);
+                const engineMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0xff4400,
+                    transparent: true,
+                    opacity: 0
+                });
+                this.engineGlow = new THREE.Mesh(engineGeometry, engineMaterial);
+                this.engineGlow.position.set(-12, 0, 0);
+                this.engineGlow.rotation.z = Math.PI / 2;
+                shipGroup.add(this.engineGlow);
+                
+                this.ship = shipGroup;
+                this.ship.position.set(0, 0, 0);
+                this.scene.add(this.ship);
+                
+                // Position camera behind ship
+                this.camera.position.set(-30, 10, 0);
+                this.camera.lookAt(this.ship.position);
+            }
+            
+            handleInput() {
+                const rotationSpeed = 0.02;
+                const dampening = 0.98;
+                
+                // Reset position
+                if (this.keys['KeyR']) {
+                    this.ship.position.set(0, 0, 0);
+                    this.ship.rotation.set(0, 0, 0);
+                    this.velocity.set(0, 0, 0);
+                    this.angularVelocity.set(0, 0, 0);
+                    this.fuel = 100;
+                }
+                
+                // Rotation controls
+                if (this.keys['KeyW']) this.angularVelocity.x -= rotationSpeed; // Pitch up
+                if (this.keys['KeyS']) this.angularVelocity.x += rotationSpeed; // Pitch down
+                if (this.keys['KeyA']) this.angularVelocity.z += rotationSpeed; // Roll left
+                if (this.keys['KeyD']) this.angularVelocity.z -= rotationSpeed; // Roll right
+                if (this.keys['KeyQ']) this.angularVelocity.y -= rotationSpeed; // Yaw left
+                if (this.keys['KeyE']) this.angularVelocity.y += rotationSpeed; // Yaw right
+                
+                // Thrust controls
+                const boostMultiplier = this.keys['ShiftLeft'] || this.keys['ShiftRight'] ? 2 : 1;
+                
+                if (this.keys['Space'] && this.fuel > 0) {
+                    this.thrust = Math.min(100, this.thrust + 2);
+                    this.fuel = Math.max(0, this.fuel - 0.1 * boostMultiplier);
+                    
+                    // Apply thrust in ship's forward direction
+                    const forward = new THREE.Vector3(1, 0, 0);
+                    forward.applyQuaternion(this.ship.quaternion);
+                    forward.multiplyScalar(this.thrustPower * (this.thrust / 100) * boostMultiplier);
+                    this.velocity.add(forward);
+                    
+                    // Engine glow effect
+                    this.engineGlow.material.opacity = Math.min(0.8, this.thrust / 100);
+                    this.engineGlow.scale.setScalar(1 + (this.thrust / 200));
+                } else {
+                    this.thrust = Math.max(0, this.thrust - 1);
+                    this.engineGlow.material.opacity = Math.max(0, this.engineGlow.material.opacity - 0.05);
+                }
+                
+                // Apply angular velocity
+                this.ship.rotation.x += this.angularVelocity.x;
+                this.ship.rotation.y += this.angularVelocity.y;
+                this.ship.rotation.z += this.angularVelocity.z;
+                
+                // Dampen angular velocity
+                this.angularVelocity.multiplyScalar(dampening);
+                
+                // Apply velocity dampening (space friction simulation)
+                this.velocity.multiplyScalar(0.999);
+                
+                // Limit max speed
+                const speed = this.velocity.length();
+                if (speed > this.maxSpeed) {
+                    this.velocity.normalize().multiplyScalar(this.maxSpeed);
+                }
+            }
+            
+            updatePhysics() {
+                // Apply velocity to position
+                this.ship.position.add(this.velocity);
+                
+                // Update camera to follow ship
+                const idealCameraPosition = new THREE.Vector3(-30, 10, 0);
+                idealCameraPosition.applyQuaternion(this.ship.quaternion);
+                idealCameraPosition.add(this.ship.position);
+                
+                this.camera.position.lerp(idealCameraPosition, 0.1);
+                
+                const lookAtPosition = this.ship.position.clone();
+                const forward = new THREE.Vector3(10, 0, 0);
+                forward.applyQuaternion(this.ship.quaternion);
+                lookAtPosition.add(forward);
+                
+                this.camera.lookAt(lookAtPosition);
+            }
+            
+            updateHUD() {
+                const speed = this.velocity.length();
+                const altitude = Math.max(0, this.ship.position.y + 1000);
+                
+                this.speedElement.textContent = speed.toFixed(1);
+                this.altitudeElement.textContent = Math.round(altitude);
+                this.fuelElement.textContent = Math.round(this.fuel);
+                this.thrustElement.textContent = Math.round(this.thrust);
+            }
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                this.handleInput();
+                this.updatePhysics();
+                this.updateHUD();
+                
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+        
+        // Initialize the simulator
+        window.addEventListener('DOMContentLoaded', () => {
+            new SpaceFlightSimulator();
+        });
+    </script>
+</body>
+</html>
